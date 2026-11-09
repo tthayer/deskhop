@@ -9,6 +9,7 @@
  * See the file LICENSE for the full license text.
  */
 #include "main.h"
+#include "trackpad.h"
 
 /*********  Global Variables  **********/
 device_t global_state     = {0};
@@ -30,6 +31,9 @@ int main(void) {
         [3] = {.exec = &process_mouse_queue_task, .frequency = _HZ(2000)},   // | Check if there were any mouse movements and send them
         [4] = {.exec = &process_hid_queue_task,   .frequency = _HZ(1000)},   // | Check if there are any packets to send over vendor link
         [5] = {.exec = &process_uart_tx_task,     .frequency = _TOP()},      // | Check if there are any packets to send over UART
+#ifdef DH_TRACKPAD_PROBE
+        [6] = {.exec = &trackpad_probe_task,      .frequency = _HZ(1000)},   // | Drain trackpad probe log to CDC
+#endif
     };                                                                       // `----- then go back and repeat forever
     const int NUM_TASKS = ARRAY_SIZE(tasks_core0);
 
@@ -38,6 +42,10 @@ int main(void) {
 
     // Initial board setup
     initial_setup(device);
+
+#ifdef DH_TRACKPAD_PROBE
+    trackpad_probe_init();
+#endif
 
     // Initial state, A is the default output
     set_active_output(device, OUTPUT_A);

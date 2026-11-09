@@ -9,6 +9,7 @@
  * See the file LICENSE for the full license text.
  */
 #include "main.h"
+#include "trackpad.h"
 
 /* Default configuration */
 const config_t default_config = {
@@ -62,4 +63,5 @@ const config_t default_config = {
     .kbd_led_as_indicator = KBD_LED_AS_INDICATOR,
     .jump_threshold = JUMP_THRESHOLD,
     .led_mode = LED_ACTIVE_OUTPUT,
+    .trackpad_scroll_dir = TRACKPAD_SCROLL_NATURAL,
 };

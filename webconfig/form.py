@@ -13,6 +13,8 @@ class FormField:
     # How many of the units the device stores go into one of the units the form shows.
     # 1 where they are the same thing, which is everything but the screensaver timers.
     scale: int = 1
+    # Short hint shown under the field.
+    note: str | None = None
 
 SHORTCUTS = {
     0x73: "None",
@@ -35,6 +37,7 @@ CONFIG_ = [
     FormField(75, "Enable Acceleration", None, {}, "uint8", "checkbox"),
     FormField(83, "Gaming Mode Default ON", None, {}, "uint8", "checkbox"),
     FormField(77, "Jump Threshold", 0, {"min": 0, "max": 3000}, "uint16", "range"),
+    FormField(85, "Scroll Direction", 0, {0: "Natural", 1: "Traditional"}, "uint8", note="Trackpads only."),
 
     FormField(1002, "Keyboard", elem="label"),
     FormField(72, "Force KBD Boot Protocol", None, {}, "uint8", "checkbox"),
@@ -76,6 +79,7 @@ def generate_output(base, data):
             "type": field.data_type,
             "elem": field.elem,
             "scale": field.scale,
+            "note": field.note,
         }
         for field in data
     ]

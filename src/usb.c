@@ -11,6 +11,7 @@
 
 #include "main.h"
 #include "hid_report.h"
+#include "trackpad.h"
 
 _Static_assert(MAX_DEVICES <= CFG_TUH_DEVICE_MAX,
                "MAX_DEVICES must not exceed CFG_TUH_DEVICE_MAX");
@@ -189,6 +190,9 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
             break;
     }
 
+    if (trackpad_is_magic_trackpad(dev_addr))
+        trackpad_umount(dev_addr, instance);
+
     /* Also clear the interface structure, otherwise plugging something else later
        might be a fun (and confusing) experience */
     memset(iface, 0, sizeof(hid_interface_t));
@@ -204,6 +208,10 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_re
     hid_interface_t *iface = &global_state.iface[dev_addr-1][instance];
 
     iface->protocol = tuh_hid_get_protocol(dev_addr, instance);
+
+#ifdef DH_TRACKPAD_PROBE
+    trackpad_probe_log_hid_mount(dev_addr, instance, itf_protocol, desc_len);
+#endif
 
     /* Parse the report descriptor into our internal structure. */
     parse_report_descriptor(iface, desc_report, desc_len);
@@ -244,6 +252,9 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_re
             break;
     }
 
+    if (trackpad_is_magic_trackpad(dev_addr))
+        trackpad_mount(dev_addr, instance, itf_protocol, desc_len);
+
     /* Also set mouse_connected if report descriptor contains mouse, even if interface
        protocol says keyboard. This handles composite devices like QMK. */
     if (iface->mouse.is_found) {
@@ -268,6 +279,11 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         return;
 
     hid_interface_t *iface = &global_state.iface[dev_addr-1][instance];
+
+    if (trackpad_is_magic_trackpad(dev_addr) && trackpad_report(dev_addr, instance, report, len)) {
+        tuh_hid_receive_report(dev_addr, instance);
+        return;
+    }
 
     /* Calculate a device index that distinguishes between different devices
        while staying within the bounds of MAX_DEVICES.
@@ -327,4 +343,8 @@ void tuh_hid_set_protocol_complete_cb(uint8_t dev_addr, uint8_t idx, uint8_t pro
 
     hid_interface_t *iface = &global_state.iface[dev_addr-1][idx];
     iface->protocol = protocol;
+
+    /* The control pipe is free again; send a Magic Trackpad mode switch if one is waiting. */
+    if (trackpad_is_magic_trackpad(dev_addr))
+        trackpad_retry_mode_switch();
 }

@@ -8,6 +8,7 @@ set(VERSION_MINOR 80)
 ## Release Type Selection
 option(DH_DEBUG "Build a debug version" OFF)
 option(DH_DEBUG_CDC_FLASH "Enable CDC command to trigger bootloader mode" OFF)
+option(DH_TRACKPAD_PROBE "Log Magic Trackpad 2 multitouch reports over CDC (needs DH_DEBUG)" OFF)
 
 ## Hardware Configuration
 set(DP_PIN_DEFAULT 14 CACHE STRING "Default USB D+ Pin Number")
@@ -64,6 +65,7 @@ set(COMMON_SOURCES
   ${SRC_DIR}/setup.c
   ${SRC_DIR}/keyboard.c
   ${SRC_DIR}/mouse.c
+  ${SRC_DIR}/trackpad.c
   ${SRC_DIR}/tasks.c
   ${SRC_DIR}/led.c
   ${SRC_DIR}/uart.c
@@ -124,6 +126,13 @@ endif()
 
 if (DH_DEBUG_CDC_FLASH)
   add_definitions(-DDH_DEBUG_CDC_FLASH)
+endif()
+
+if (DH_TRACKPAD_PROBE)
+  if (NOT DH_DEBUG)
+    message(FATAL_ERROR "DH_TRACKPAD_PROBE requires DH_DEBUG=ON")
+  endif()
+  add_definitions(-DDH_TRACKPAD_PROBE)
 endif()
   
 target_include_directories(${binary} PUBLIC ${COMMON_INCLUDES})

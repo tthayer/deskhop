@@ -352,10 +352,18 @@ mouse_report_t create_mouse_report(device_t *state, mouse_values_t *values) {
 
 void process_mouse_report(uint8_t *raw_report, int len, uint8_t itf, hid_interface_t *iface) {
     mouse_values_t values = {0};
-    device_t *state = &global_state;
 
     /* Interpret the mouse HID report, extract and save values we need. */
-    extract_report_values(raw_report, len, state, &values, iface);
+    extract_report_values(raw_report, len, &global_state, &values, iface);
+
+    process_mouse_values(&values);
+}
+
+/* Move the pointer, scroll and press buttons from already-decoded values.
+   Shared by HID mice and synthesized sources such as the Magic Trackpad. */
+void process_mouse_values(mouse_values_t *in) {
+    mouse_values_t values = *in;
+    device_t *state = &global_state;
 
     /* If nothing changed, don't send a report. This prevents composite keyboards
        (e.g. QMK) that expose a mouse HID interface from generating spurious

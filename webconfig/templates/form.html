@@ -52,7 +52,7 @@
     {% for k, v in item["values"].items() %}
     <option value="{{ k }}">{{ v }}</option>
     {% endfor %}
-    </select><br />
+    </select>{% if item.note %}<small class="note">{{ item.note }}</small>{% endif %}<br />
 
   {% else %}
       {{ label(item, class='') }}
