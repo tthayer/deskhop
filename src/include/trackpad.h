@@ -26,6 +26,14 @@
 #define TRACKPAD_SCROLL_NATURAL     0 /* Content follows the fingers */
 #define TRACKPAD_SCROLL_TRADITIONAL 1 /* Like a mouse wheel; the host OS setting then decides */
 
+/* config.trackpad_pinch_zoom and config.trackpad_swipe_nav are plain 0/1 toggles */
+
+/* Two-finger gesture tuning (trackpad units, roughly 47 per mm). A 2-finger
+   gesture is classified once, then stays that type until the fingers lift. */
+#define TRACKPAD_GESTURE_LOCK 50  /* Travel before the gesture type is decided */
+#define TRACKPAD_NAV_TRIGGER  110 /* Horizontal travel needed to fire back/forward */
+#define TRACKPAD_PINCH_DIV    40  /* Distance change per zoom step (and Ctrl+wheel notch) */
+
 /* Click stabilisation. Pressing a finger down to click (and lifting off again)
    shifts its reported position a little, which would otherwise move the pointer
    or turn the click into a drag. */

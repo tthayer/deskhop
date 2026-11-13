@@ -86,6 +86,9 @@ typedef struct {
     uint8_t led_mode;
     /* Trackpad 2-finger scroll: 0 = natural, 1 = traditional. Was reserved, so 0 must stay the default */
     uint8_t trackpad_scroll_dir;
+    /* Trackpad two-finger gestures: 0 = disabled, 1 = enabled */
+    uint8_t trackpad_pinch_zoom;
+    uint8_t trackpad_swipe_nav;
     uint8_t _reserved[1];
 
     // Keep checksum at the end of the struct
@@ -109,6 +112,7 @@ typedef struct {
 
     hid_keyboard_report_t local_kbd_states[MAX_DEVICES]; // Store keyboard states
     hid_keyboard_report_t remote_kbd_state;              // Store combined remote keyboard state
+    uint8_t synth_kbd_modifier;                          // Modifier held by a synthetic source (e.g. pinch-zoom Ctrl)
     uint8_t max_kbd_idx;                                 // Store largest kbd_idx seen
 
     int16_t pointer_x; // Store and update the location of our mouse pointer

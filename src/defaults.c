@@ -64,4 +64,6 @@ const config_t default_config = {
     .jump_threshold = JUMP_THRESHOLD,
     .led_mode = LED_ACTIVE_OUTPUT,
     .trackpad_scroll_dir = TRACKPAD_SCROLL_NATURAL,
+    .trackpad_pinch_zoom = ENABLE,
+    .trackpad_swipe_nav = ENABLE,
 };

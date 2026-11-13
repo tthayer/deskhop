@@ -191,7 +191,8 @@ static void add_keys(hid_keyboard_report_t *dest, const hid_keyboard_report_t *s
 void release_all_keys(device_t *state) {
     memset(state->local_kbd_states, 0, sizeof(state->local_kbd_states));
     memset(&state->remote_kbd_state, 0, sizeof(hid_keyboard_report_t));
-    
+    state->synth_kbd_modifier = 0;
+
     static hid_keyboard_report_t empty_report = {0};
     queue_kbd_report(&empty_report, state);
 }
@@ -210,6 +211,9 @@ void combine_kbd_states(device_t *state, hid_keyboard_report_t *combined_report)
     /* Add remote keyboard */
     combined_report->modifier |= state->remote_kbd_state.modifier;
     add_keys(combined_report, &state->remote_kbd_state);
+
+    /* Add any modifier synthesized by an internal source (e.g. pinch-zoom Ctrl) */
+    combined_report->modifier |= state->synth_kbd_modifier;
 }
 
 /* ==================================================== *
@@ -273,6 +277,78 @@ void send_key(hid_keyboard_report_t *report, device_t *state) {
         /* Send the combined report to ensure all keys are included */
         queue_packet((uint8_t *)&combined_report, KEYBOARD_REPORT_MSG, KBD_REPORT_LENGTH);
     }
+}
+
+/* Send one keyboard report to whichever output is active. */
+static void send_chord_report(device_t *state, hid_keyboard_report_t *report) {
+    if (CURRENT_BOARD_IS_ACTIVE_OUTPUT) {
+        queue_kbd_report(report, state);
+        state->last_activity[BOARD_ROLE] = time_us_64();
+    } else {
+        queue_packet((uint8_t *)report, KEYBOARD_REPORT_MSG, KBD_REPORT_LENGTH);
+    }
+}
+
+/*
+ * Synthetic modifier+key chords (used by trackpad gestures).
+ *
+ * A press followed immediately by its release can land inside a single host
+ * polling interval, in which case the keypress is never seen. So the press is
+ * held for CHORD_HOLD_US and the release is emitted later by chord_release_task.
+ * Only one chord is queued at a time; extra requests are coalesced.
+ */
+#define CHORD_HOLD_US _MS(15)
+
+static hid_keyboard_report_t chord_next;
+static bool     chord_pressed;
+static bool     chord_next_valid;
+static uint64_t chord_release_at;
+
+void send_key_chord(device_t *state, uint8_t modifier, uint8_t keycode) {
+    hid_keyboard_report_t chord = {0};
+    chord.modifier   = modifier;
+    chord.keycode[0] = keycode;
+
+    if (!chord_pressed) {
+        send_chord_report(state, &chord);
+        chord_pressed    = true;
+        chord_release_at = time_us_64() + CHORD_HOLD_US;
+        return;
+    }
+
+    chord_next       = chord;
+    chord_next_valid = true;
+}
+
+/* Release a held chord once its hold time elapses, then start the next one. */
+void chord_release_task(device_t *state) {
+    if (chord_pressed && time_us_64() >= chord_release_at) {
+        hid_keyboard_report_t release = {0};
+        send_chord_report(state, &release);
+        chord_pressed = false;
+    }
+
+    if (!chord_pressed && chord_next_valid) {
+        send_chord_report(state, &chord_next);
+        chord_pressed    = true;
+        chord_next_valid = false;
+        chord_release_at = time_us_64() + CHORD_HOLD_US;
+    }
+}
+
+/* Hold (modifier != 0) or release (modifier == 0) a modifier synthesized by an
+   internal source. It is OR'd into every combined report, so it stays held
+   across mouse reports until explicitly cleared. */
+void set_synth_modifier(device_t *state, uint8_t modifier) {
+    if (state->synth_kbd_modifier == modifier)
+        return;
+
+    state->synth_kbd_modifier = modifier;
+
+    /* Emit a report now so the host sees the change immediately (send_key builds
+       the combined report, which includes the synthesized modifier). */
+    hid_keyboard_report_t empty = {0};
+    send_key(&empty, state);
 }
 
 /* Decide if consumer control reports go local or to the other board */

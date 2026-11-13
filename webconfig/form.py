@@ -38,6 +38,9 @@ CONFIG_ = [
     FormField(83, "Gaming Mode Default ON", None, {}, "uint8", "checkbox"),
     FormField(77, "Jump Threshold", 0, {"min": 0, "max": 3000}, "uint16", "range"),
     FormField(85, "Scroll Direction", 0, {0: "Natural", 1: "Traditional"}, "uint8", note="Trackpads only."),
+    FormField(86, "Pinch to Zoom", None, {}, "uint8", "checkbox", note="Trackpads only."),
+    FormField(87, "Swipe to Navigate", None, {}, "uint8", "checkbox",
+              note="Trackpads only. Two-finger horizontal swipe goes back/forward."),
 
     FormField(1002, "Keyboard", elem="label"),
     FormField(72, "Force KBD Boot Protocol", None, {}, "uint8", "checkbox"),

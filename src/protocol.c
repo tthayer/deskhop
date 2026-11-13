@@ -69,6 +69,8 @@ const field_map_t api_field_map[] = {
     { 83, false, UINT8,  1, offsetof(device_t, config.gaming_mode_default) },
     { 84, false, UINT8,  1, offsetof(device_t, config.led_mode) },
     { 85, false, UINT8,  1, offsetof(device_t, config.trackpad_scroll_dir) },
+    { 86, false, UINT8,  1, offsetof(device_t, config.trackpad_pinch_zoom) },
+    { 87, false, UINT8,  1, offsetof(device_t, config.trackpad_swipe_nav) },
 };
 
 const field_map_t* get_field_map_entry(uint32_t index) {

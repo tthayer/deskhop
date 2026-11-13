@@ -32,6 +32,13 @@
 
 #include "main.h"
 #include "trackpad.h"
+#include <math.h>
+
+/* Two-finger gesture classification; locked in until the fingers lift. */
+#define GESTURE_NONE   0
+#define GESTURE_SCROLL 1
+#define GESTURE_NAV    2
+#define GESTURE_PINCH  3
 
 #define MT_REPORT_ID      0x02
 #define MT_HEADER_LEN     12
@@ -67,6 +74,15 @@ typedef struct {
     /* Finger travel since the click started, and whether it became a drag. */
     int32_t click_travel_x, click_travel_y;
     bool dragging;
+
+    /* Two-finger gesture state. Translation and pinch are accumulated from the
+       start of the gesture so its type can be decided before emitting anything. */
+    uint8_t gesture_mode;
+    bool    nav_fired;
+    bool    nav_back;
+    bool    zoom_modifier_active;
+    int32_t gesture_dx, gesture_dy, gesture_pinch;
+    int32_t zoom_acc;
 } trackpad_state_t;
 
 static trackpad_state_t tp = {0};
@@ -234,8 +250,13 @@ void trackpad_mount(uint8_t dev_addr, uint8_t instance, uint8_t itf_protocol, ui
 void trackpad_umount(uint8_t dev_addr, uint8_t instance) {
     PROBE_LOG("TP umount dev=%u inst=%u\r\n", dev_addr, instance);
 
-    if (dev_addr == tp.dev_addr && instance == tp.instance)
+    if (dev_addr == tp.dev_addr && instance == tp.instance) {
+        /* Don't leave a synthesized modifier (e.g. zoom Ctrl) stuck down. */
+        if (tp.zoom_modifier_active)
+            set_synth_modifier(&global_state, 0);
+
         memset(&tp, 0, sizeof(tp));
+    }
 }
 
 /* ================================================== *
@@ -329,6 +350,127 @@ static int32_t take_steps(int32_t *acc, int32_t div, int32_t limit) {
     return steps;
 }
 
+/* ================================================== *
+ * Two-finger gestures
+ * ================================================== */
+
+static const contact_t *find_prev_contact(uint8_t id) {
+    for (int i = 0; i < tp.prev_count; i++)
+        if (tp.prev[i].id == id)
+            return &tp.prev[i];
+
+    return NULL;
+}
+
+static int32_t contact_distance(const contact_t *a, const contact_t *b) {
+    int32_t dx = a->x - b->x, dy = a->y - b->y;
+
+    return (int32_t)sqrtf((float)(dx * dx + dy * dy));
+}
+
+/* Matches the natural/traditional setting: which way a finger movement maps. */
+static int32_t trackpad_direction_sign(void) {
+    return (global_state.config.trackpad_scroll_dir == TRACKPAD_SCROLL_TRADITIONAL) ? -1 : 1;
+}
+
+static void two_finger_scroll(mouse_values_t *values, int32_t dx, int32_t dy) {
+    int32_t sign = trackpad_direction_sign();
+
+    /* Natural: content follows the fingers. Wheel > 0 scrolls up, pan > 0 right. */
+    tp.acc_wheel += sign * dy;
+    tp.acc_pan   -= sign * dx;
+    values->wheel = take_steps(&tp.acc_wheel, TRACKPAD_SCROLL_DIV, INT8_MAX);
+    values->pan   = take_steps(&tp.acc_pan, TRACKPAD_SCROLL_DIV, INT8_MAX);
+}
+
+/* Back/forward history: Cmd+[ / Cmd+] on macOS, Alt+Left / Alt+Right elsewhere. */
+static void send_navigation(bool back) {
+    if (global_state.config.output[global_state.active_output].os == MACOS)
+        send_key_chord(&global_state, KEYBOARD_MODIFIER_LEFTGUI,
+                       back ? HID_KEY_BRACKET_LEFT : HID_KEY_BRACKET_RIGHT);
+    else
+        send_key_chord(&global_state, KEYBOARD_MODIFIER_LEFTALT,
+                       back ? HID_KEY_ARROW_LEFT : HID_KEY_ARROW_RIGHT);
+}
+
+/* Zoom: Ctrl+wheel on Windows/Linux/ChromeOS, Cmd+= / Cmd+- on macOS. */
+static void handle_pinch(mouse_values_t *values, int32_t pinch) {
+    tp.zoom_acc += pinch;
+
+    if (global_state.config.output[global_state.active_output].os == MACOS) {
+        while (tp.zoom_acc >= TRACKPAD_PINCH_DIV) {
+            send_key_chord(&global_state, KEYBOARD_MODIFIER_LEFTGUI, HID_KEY_EQUAL);
+            tp.zoom_acc -= TRACKPAD_PINCH_DIV;
+        }
+        while (tp.zoom_acc <= -TRACKPAD_PINCH_DIV) {
+            send_key_chord(&global_state, KEYBOARD_MODIFIER_LEFTGUI, HID_KEY_MINUS);
+            tp.zoom_acc += TRACKPAD_PINCH_DIV;
+        }
+    } else {
+        /* Hold Ctrl for the whole pinch so every wheel notch zooms. */
+        set_synth_modifier(&global_state, KEYBOARD_MODIFIER_LEFTCTRL);
+        tp.zoom_modifier_active = true;
+        values->wheel = take_steps(&tp.zoom_acc, TRACKPAD_PINCH_DIV, INT8_MAX);
+    }
+}
+
+/* Classify the gesture from accumulated travel, then act on it once locked in. */
+static void handle_two_finger(mouse_values_t *values, int32_t dx, int32_t dy, int32_t pinch) {
+    const config_t *config = &global_state.config;
+    bool zoom_enabled = config->trackpad_pinch_zoom != DISABLE;
+    bool nav_enabled  = config->trackpad_swipe_nav != DISABLE;
+
+    /* With both gestures off, keep the original two-finger scroll/pan behaviour. */
+    if (!zoom_enabled && !nav_enabled) {
+        two_finger_scroll(values, dx, dy);
+        return;
+    }
+
+    tp.gesture_dx += dx;
+    tp.gesture_dy += dy;
+    if (zoom_enabled)
+        tp.gesture_pinch += pinch;
+
+    int32_t ax = abs(tp.gesture_dx);
+    int32_t ay = abs(tp.gesture_dy);
+    int32_t ap = abs(tp.gesture_pinch);
+
+    if (tp.gesture_mode == GESTURE_NONE) {
+        if (zoom_enabled && ap >= TRACKPAD_GESTURE_LOCK && ap >= ax && ap >= ay)
+            tp.gesture_mode = GESTURE_PINCH;
+        else if (ax >= TRACKPAD_GESTURE_LOCK && ax * 2 >= ay * 3) /* clearly horizontal */
+            tp.gesture_mode = nav_enabled ? GESTURE_NAV : GESTURE_SCROLL;
+        else if (ay >= TRACKPAD_GESTURE_LOCK)
+            tp.gesture_mode = GESTURE_SCROLL;
+        else
+            return; /* Not enough travel yet: hold still until the type is clear. */
+    }
+
+    switch (tp.gesture_mode) {
+        case GESTURE_SCROLL:
+            two_finger_scroll(values, dx, dy);
+            break;
+
+        case GESTURE_NAV: {
+            int32_t signed_dx = trackpad_direction_sign() * tp.gesture_dx;
+            bool back = signed_dx > 0;
+
+            /* Fire on the first threshold crossing, and again if the swipe
+               reverses direction past the opposite threshold. */
+            if (abs(signed_dx) >= TRACKPAD_NAV_TRIGGER && (!tp.nav_fired || back != tp.nav_back)) {
+                tp.nav_fired = true;
+                tp.nav_back  = back;
+                send_navigation(back);
+            }
+            break;
+        }
+
+        case GESTURE_PINCH:
+            handle_pinch(values, pinch);
+            break;
+    }
+}
+
 static void process_frame(uint8_t const *report, uint16_t len) {
     contact_t cur[TRACKPAD_MAX_CONTACTS];
     uint8_t count = decode_contacts(report, len, cur);
@@ -338,6 +480,16 @@ static void process_frame(uint8_t const *report, uint16_t len) {
 
     average_delta(cur, count, &dx, &dy, &max_dp);
 
+    /* Change in distance between the two fingers; used to detect a pinch. */
+    int32_t pinch = 0;
+    if (count == 2 && tp.prev_count == 2) {
+        const contact_t *pa = find_prev_contact(cur[0].id);
+        const contact_t *pb = find_prev_contact(cur[1].id);
+
+        if (pa && pb)
+            pinch = contact_distance(&cur[0], &cur[1]) - contact_distance(pa, pb);
+    }
+
     /* Finger count changed: drop leftovers and let positions settle so lifting
        or adding a finger doesn't jerk the pointer or scroll. */
     if (count != tp.prev_count) {
@@ -345,11 +497,23 @@ static void process_frame(uint8_t const *report, uint16_t len) {
         tp.acc_wheel = tp.acc_pan = 0;
         if (count == 0)
             tp.acc_x = tp.acc_y = 0;
+
+        /* End any two-finger gesture and release a held zoom modifier. */
+        tp.gesture_mode = GESTURE_NONE;
+        tp.nav_fired = false;
+        tp.nav_back  = false;
+        tp.gesture_dx = tp.gesture_dy = 0;
+        tp.gesture_pinch = 0;
+        tp.zoom_acc = 0;
+        if (tp.zoom_modifier_active) {
+            set_synth_modifier(&global_state, 0);
+            tp.zoom_modifier_active = false;
+        }
     }
 
     if (tp.settle) {
         tp.settle--;
-        dx = dy = 0;
+        dx = dy = pinch = 0;
     }
 
     /* Choose the button when the click starts and hold it until release. */
@@ -381,12 +545,7 @@ static void process_frame(uint8_t const *report, uint16_t len) {
         values.move_x = take_steps(&tp.acc_x, TRACKPAD_POINTER_DIV, INT16_MAX);
         values.move_y = take_steps(&tp.acc_y, TRACKPAD_POINTER_DIV, INT16_MAX);
     } else if (count == 2) {
-        /* Natural: content follows the fingers. Wheel > 0 scrolls up, pan > 0 right. */
-        int32_t sign = (global_state.config.trackpad_scroll_dir == TRACKPAD_SCROLL_TRADITIONAL) ? -1 : 1;
-        tp.acc_wheel += sign * dy;
-        tp.acc_pan   -= sign * dx;
-        values.wheel = take_steps(&tp.acc_wheel, TRACKPAD_SCROLL_DIV, INT8_MAX);
-        values.pan   = take_steps(&tp.acc_pan, TRACKPAD_SCROLL_DIV, INT8_MAX);
+        handle_two_finger(&values, dx, dy, pinch);
     }
 
     values.buttons = tp.buttons;

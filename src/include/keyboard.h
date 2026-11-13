@@ -49,6 +49,8 @@ void     queue_system_packet(uint8_t *, device_t *);
 void     release_all_keys(device_t *);
 void     send_consumer_control(uint8_t *, device_t *);
 void     send_key(hid_keyboard_report_t *, device_t *);
+void     send_key_chord(device_t *, uint8_t, uint8_t);
+void     set_synth_modifier(device_t *, uint8_t);
 
 /* ==================================================== *
  * Map hotkeys to alternative layouts
